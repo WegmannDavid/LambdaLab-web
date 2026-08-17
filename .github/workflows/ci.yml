@@ -59,7 +59,7 @@ jobs:
       - name: Wait for it to answer
         run: |
           for _ in $(seq 1 40); do
-            curl -sf http://127.0.0.1:8080/healthz >/dev/null && exit 0
+            curl -sf http://127.0.0.1:8080/api/health >/dev/null && exit 0
             sleep 0.5
           done
           echo "service never became healthy" >&2

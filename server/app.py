@@ -96,7 +96,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = self.path.split("?", 1)[0]
-        if path == "/healthz":
+        # `/api/health`, not the conventional `/healthz`: Cloud Run's frontend intercepts
+        # that exact path and answers 404 itself, so the container never sees the request.
+        # `/health` and `/healthz/` do arrive — it is only the bare spelling that is taken.
+        if path == "/api/health":
             self._send_json(200, {"status": "ok"})
             return
         rel = "index.html" if path == "/" else path.lstrip("/")

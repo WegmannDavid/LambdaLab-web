@@ -62,8 +62,8 @@ def main() -> int:
     base = sys.argv[1].rstrip("/")
     print(f"service: checking {base}")
 
-    status, _ = get(base, "/healthz")
-    check("healthz responds", status == 200, f"status {status}")
+    status, _ = get(base, "/api/health")
+    check("health endpoint responds", status == 200, f"status {status}")
 
     status, body = get(base, "/")
     check("index is served", status == 200 and "<title>LambdaLab</title>" in body)
