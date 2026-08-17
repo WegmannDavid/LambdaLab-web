@@ -1,0 +1,74 @@
+# Integrate this website against the real compiler, on every change.
+#
+# Nothing here builds Lean. The compiler arrives as a published image, which is the entire
+# coupling between the two repos — so this job runs in a couple of minutes and needs no
+# toolchain, no Mathlib, and no credentials (both repos are public).
+#
+# Two test layers, and the split is deliberate:
+#
+#   contract/check.py   what we depend on FROM the compiler. The compiler repo runs this
+#                       same file against its freshly built binary before publishing, so if
+#                       they break us they find out in their pipeline, not ours.
+#   test/service.py     our own service behaving correctly. Only we run this.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  COMPILER: ghcr.io/wegmanndavid/lambdalab-compiler:latest
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # `:latest`, not a pinned digest, on purpose: this repo should go red when the
+      # compiler's newest build stops satisfying the contract, because that is the signal
+      # the whole two-repo arrangement exists to produce.
+      - name: Fetch the published compiler
+        run: |
+          docker pull "$COMPILER"
+          cid=$(docker create "$COMPILER")
+          docker cp "$cid:/usr/local/bin/stlc" ./stlc
+          docker rm "$cid"
+          ls -lh ./stlc
+
+      - name: Contract — what we depend on from the compiler
+        run: python3 contract/check.py ./stlc
+
+      - name: Build the image
+        run: docker build -t lambdalab-web:ci .
+
+      - name: Start it
+        run: docker run -d --name web -p 8080:8080 lambdalab-web:ci
+
+      - name: Wait for it to answer
+        run: |
+          for _ in $(seq 1 40); do
+            curl -sf http://127.0.0.1:8080/healthz >/dev/null && exit 0
+            sleep 0.5
+          done
+          echo "service never became healthy" >&2
+          exit 1
+
+      - name: Service — our own behaviour, over HTTP
+        run: python3 test/service.py http://127.0.0.1:8080
+
+      # Without this, a failure above leaves you staring at a red X and no reason for it.
+      - name: Container logs
+        if: failure()
+        run: docker logs web

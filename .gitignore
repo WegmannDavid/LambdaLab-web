@@ -19,3 +19,6 @@ venv/
 
 # Local environment
 .env
+
+# Compiler binary extracted from the published image during CI/local testing
+/stlc
