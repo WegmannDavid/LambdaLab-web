@@ -72,3 +72,83 @@ jobs:
       - name: Container logs
         if: failure()
         run: docker logs web
+
+  # Only after `test` is green, and only from main. A pull request builds and is tested; it
+  # does not deploy.
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      id-token: write   # mint the OIDC token Google exchanges for a short-lived credential
+
+    env:
+      PROJECT: lambdalab-web
+      REGION: europe-west3
+      SERVICE: lambdalab-web
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # No service-account key exists, here or anywhere. GitHub signs a token asserting
+      # which repo and ref is running; Google's workload identity pool is configured to
+      # accept it only from this repository, and hands back a credential good for minutes.
+      # Nothing long-lived is stored, so there is nothing to leak or rotate.
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/713608289216/locations/global/workloadIdentityPools/github/providers/github
+          service_account: github-deployer@lambdalab-web.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and push to Artifact Registry
+        run: |
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT/web/$SERVICE"
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+        # Cloud Run cannot pull from GHCR — Artifact Registry or nothing. The *compiler*
+        # image still comes from GHCR, but that is a build-time base, resolved here on the
+        # runner, not something Cloud Run ever sees.
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --image "$IMAGE:${{ github.sha }}" \
+            --region "$REGION" \
+            --project "$PROJECT" \
+            --service-account lambdalab-run@lambdalab-web.iam.gserviceaccount.com \
+            --allow-unauthenticated \
+            --port 8080 \
+            --cpu 1 --memory 512Mi \
+            --concurrency 8 \
+            --max-instances 3 \
+            --timeout 30s \
+            --quiet
+        # concurrency 8, not the default 80: every request forks a compiler, and 80 of those
+        # at once would exhaust the instance. max-instances 3 caps both the bill and the
+        # blast radius of anyone who decides to hammer a public compile endpoint.
+        #
+        # The service runs as lambdalab-run, which holds no permissions whatsoever. It runs
+        # arbitrary input from the internet; it should be able to reach nothing.
+
+      - name: Report the URL
+        run: |
+          URL=$(gcloud run services describe "$SERVICE" --region "$REGION" \
+                  --project "$PROJECT" --format='value(status.url)')
+          echo "$URL"
+          echo "deployed: $URL" >> "$GITHUB_STEP_SUMMARY"
+
+      # The image being good is not the same as the deployment being good. Same checks, real
+      # URL, after the traffic switch.
+      - name: Service checks against production
+        run: |
+          URL=$(gcloud run services describe "$SERVICE" --region "$REGION" \
+                  --project "$PROJECT" --format='value(status.url)')
+          python3 test/service.py "$URL"
