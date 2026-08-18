@@ -74,6 +74,15 @@ Cloud Run, `europe-west3`, deployed by `.github/workflows/ci.yml` after the test
 GitHub signs a token naming this repository, Google's pool accepts it from here alone, and
 the credential it returns lasts minutes.
 
+The compiler is baked into the image, so a new compiler release does not reach production by
+itself — and the compiler's repo deliberately holds no credential to push one here. Instead
+this repo **pulls, on a schedule**: nightly, CI re-runs the contract against whatever
+`:latest` has become, and deploys only if that digest differs from the one the live service
+is stamped with (`COMPILER_DIGEST`). The consumer keeps deciding when it takes a new version,
+which is the same principle as the consumer-driven contract; a scheduled run that finds
+nothing new still exercises the contract and checks production, and costs a couple of
+minutes. To take a new compiler immediately, run the workflow by hand.
+
 The service runs as an identity with no permissions at all — it executes arbitrary input
 from the internet and should be able to reach nothing. Concurrency is 8 rather than the
 default 80, because every request forks a compiler; instances are capped at 3.

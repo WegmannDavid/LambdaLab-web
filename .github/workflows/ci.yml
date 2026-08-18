@@ -17,6 +17,14 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  # The compiler lives in another repo and publishing an image does not push anything here,
+  # so nothing in *this* repo changes when it moves. We therefore pull rather than being
+  # pushed to: no cross-repo trigger, no PAT, and the consumer keeps deciding when it takes a
+  # new version. Daily, this run re-checks the contract against whatever `:latest` has become
+  # — the integration canary — and redeploys only when the digest we are serving is no longer
+  # the digest that exists.
+  schedule:
+    - cron: '17 4 * * *'
 
 permissions:
   contents: read
@@ -33,15 +41,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    outputs:
+      # The exact compiler this run tested, so the deploy ships that one and can say what it
+      # shipped. A tag is a moving target; resolving it once here means test and production
+      # cannot end up looking at two different binaries.
+      compiler: ${{ steps.compiler.outputs.digest }}
+
     steps:
       - uses: actions/checkout@v5
 
       # `:latest`, not a pinned digest, on purpose: this repo should go red when the
       # compiler's newest build stops satisfying the contract, because that is the signal
       # the whole two-repo arrangement exists to produce.
-      - name: Fetch the published compiler
+      - id: compiler
+        name: Fetch the published compiler
         run: |
           docker pull "$COMPILER"
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$COMPILER")
+          echo "$COMPILER is $DIGEST"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
           cid=$(docker create "$COMPILER")
           docker cp "$cid:/usr/local/bin/stlc" ./stlc
           docker rm "$cid"
@@ -51,7 +69,7 @@ jobs:
         run: python3 contract/check.py ./stlc
 
       - name: Build the image
-        run: docker build -t lambdalab-web:ci .
+        run: docker build --build-arg COMPILER="${{ steps.compiler.outputs.digest }}" -t lambdalab-web:ci .
 
       - name: Start it
         run: docker run -d --name web -p 8080:8080 lambdalab-web:ci
@@ -105,11 +123,45 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
+      # What is actually live. Every deploy stamps the compiler it shipped onto the service,
+      # so this is a fact about production rather than a guess from tags or timestamps. Empty
+      # on the first run after this landed, and on a service that does not exist yet — both
+      # of which correctly read as "different", so the next deploy establishes the stamp.
+      - id: live
+        name: Which compiler production is serving
+        run: |
+          LIVE=$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT" \
+                   --format=json 2>/dev/null \
+                 | python3 -c 'import json,sys; c=json.load(sys.stdin)["spec"]["template"]["spec"]["containers"][0]; print(next((e.get("value","") for e in c.get("env",[]) if e.get("name")=="COMPILER_DIGEST"), ""))' \
+                 || true)
+          echo "live: ${LIVE:-<none>}"
+          echo "digest=$LIVE" >> "$GITHUB_OUTPUT"
+
+      # A scheduled run exists only to pick up a new compiler, so it does nothing when there
+      # isn't one. Any other trigger is a change to this repo, which always ships.
+      - id: decide
+        name: Deploy, or not
+        env:
+          LIVE: ${{ steps.live.outputs.digest }}
+          BUILT: ${{ needs.test.outputs.compiler }}
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            DEPLOY=true;  WHY="a change to this repo"
+          elif [ "$LIVE" != "$BUILT" ]; then
+            DEPLOY=true;  WHY="the compiler moved: ${LIVE:-<none>} -> $BUILT"
+          else
+            DEPLOY=false; WHY="already serving $BUILT"
+          fi
+          echo "deploy=$DEPLOY" >> "$GITHUB_OUTPUT"
+          echo "$WHY (deploy=$DEPLOY)" | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Build and push to Artifact Registry
+        if: steps.decide.outputs.deploy == 'true'
         run: |
           IMAGE="$REGION-docker.pkg.dev/$PROJECT/web/$SERVICE"
           gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
-          docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
+          docker build --build-arg COMPILER="${{ needs.test.outputs.compiler }}" \
+            -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
           docker push "$IMAGE:${{ github.sha }}"
           docker push "$IMAGE:latest"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
@@ -118,9 +170,11 @@ jobs:
         # runner, not something Cloud Run ever sees.
 
       - name: Deploy to Cloud Run
+        if: steps.decide.outputs.deploy == 'true'
         run: |
           gcloud run deploy "$SERVICE" \
             --image "$IMAGE:${{ github.sha }}" \
+            --update-env-vars "COMPILER_DIGEST=${{ needs.test.outputs.compiler }}" \
             --region "$REGION" \
             --project "$PROJECT" \
             --service-account lambdalab-run@lambdalab-web.iam.gserviceaccount.com \
@@ -146,7 +200,8 @@ jobs:
           echo "deployed: $URL" >> "$GITHUB_STEP_SUMMARY"
 
       # The image being good is not the same as the deployment being good. Same checks, real
-      # URL, after the traffic switch.
+      # URL, after the traffic switch — and unconditional, so a scheduled run that deploys
+      # nothing still checks that production is alive.
       - name: Service checks against production
         run: |
           URL=$(gcloud run services describe "$SERVICE" --region "$REGION" \
