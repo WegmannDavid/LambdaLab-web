@@ -21,25 +21,41 @@
     background: var(--bg); color: var(--fg);
     font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
   }
-  main { max-width: 60rem; margin: 0 auto; }
+  main { max-width: 74rem; margin: 0 auto; }
   h1 { font-size: 1.6rem; margin: 0 0 .3rem; letter-spacing: -0.01em; }
   .sub { color: var(--muted); margin: 0 0 2rem; }
   .sub code { font-size: .9em; }
   label { display: block; font-size: .8rem; text-transform: uppercase;
           letter-spacing: .07em; color: var(--muted); margin-bottom: .5rem; }
+  /* Source and result side by side — they are the same program in two spellings, so reading
+     one against the other is the point. Below 60rem there is no room for two columns of code,
+     and they stack back into the original order. */
+  .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+  @media (max-width: 60rem) {
+    .panes { grid-template-columns: 1fr; }
+    /* Stacked, two 17rem fields is a lot of scrolling for a phone; the pane heights only
+       need to match while they sit next to each other. */
+    .pane textarea { min-height: 11rem; }
+    .pane pre { min-height: 7rem; }
+  }
+  /* Each column is a flex box so its label sits on top and the field below takes the rest:
+     the two fields then end up exactly as tall as each other, including after a drag on the
+     textarea's resize handle. */
+  .pane { display: flex; flex-direction: column; min-width: 0; }
+  .pane textarea, .pane pre { flex: 1; }
   textarea, pre {
     width: 100%; background: var(--panel); color: var(--fg);
     border: 1px solid var(--line); border-radius: 8px; padding: .9rem 1rem;
     font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
     font-size: .95rem; line-height: 1.65;
   }
-  textarea { min-height: 11rem; resize: vertical; }
+  textarea { min-height: 17rem; resize: vertical; }
   textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  pre { margin: 0; min-height: 4.5rem; white-space: pre-wrap; word-break: break-word;
+  pre { margin: 0; min-height: 17rem; white-space: pre-wrap; word-break: break-word;
         overflow-x: auto; }
   pre.error { color: var(--err); }
   pre.pending { color: var(--muted); }
-  .row { display: flex; align-items: center; gap: 1rem; margin: 1rem 0 2rem; }
+  .row { display: flex; align-items: center; gap: 1rem; margin: 1.25rem 0 0; }
   button {
     background: var(--accent); color: var(--bg); border: 0; border-radius: 7px;
     padding: .6rem 1.4rem; font-size: .95rem; font-weight: 600; cursor: pointer;
@@ -63,16 +79,22 @@
     <code>error</code>; real diagnostics do not exist yet.
   </p>
 
-  <label for="src">Source</label>
-  <textarea id="src" spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
+  <div class="panes">
+    <div class="pane">
+      <label for="src">Source</label>
+      <textarea id="src" spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
+    </div>
+
+    <div class="pane">
+      <label for="out">Round-tripped</label>
+      <pre id="out" class="pending">Press Run.</pre>
+    </div>
+  </div>
 
   <div class="row">
     <button id="run">Run</button>
     <span class="hint">or press &#8984;/Ctrl + Enter</span>
   </div>
-
-  <label for="out">Round-tripped</label>
-  <pre id="out" class="pending">Press Run.</pre>
 
   <footer>
     The compiler is <a href="https://github.com/WegmannDavid/LambdaLab">WegmannDavid/LambdaLab</a>,
