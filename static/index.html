@@ -21,9 +21,12 @@
     background: var(--bg); color: var(--fg);
     font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
   }
-  main { max-width: 74rem; margin: 0 auto; }
+  /* The panes take the window: these are code columns, and a line of code that wraps is a
+     line you have to reassemble in your head. Only the prose keeps a measure — long lines of
+     *text* are the ones that get hard to read. */
+  main { max-width: none; margin: 0 auto; }
   h1 { font-size: 1.6rem; margin: 0 0 .3rem; letter-spacing: -0.01em; }
-  .sub { color: var(--muted); margin: 0 0 2rem; }
+  .sub { color: var(--muted); margin: 0 0 2rem; max-width: 62rem; }
   .sub code { font-size: .9em; }
   label { display: block; font-size: .8rem; text-transform: uppercase;
           letter-spacing: .07em; color: var(--muted); margin-bottom: .5rem; }
@@ -49,9 +52,9 @@
     font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
     font-size: .95rem; line-height: 1.65;
   }
-  textarea { min-height: 17rem; resize: vertical; }
+  textarea { min-height: 21rem; resize: vertical; }
   textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  pre { margin: 0; min-height: 17rem; white-space: pre-wrap; word-break: break-word;
+  pre { margin: 0; min-height: 21rem; white-space: pre-wrap; word-break: break-word;
         overflow-x: auto; }
   pre.error { color: var(--err); }
   pre.pending { color: var(--muted); }
