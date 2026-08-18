@@ -1,3 +1,9 @@
 def id : ?0 → ?1 := λ x : ⋆ . x
 
-def id2 : ?2 → ?3 := λ x : ?4 . id ( id x )
+def twice : ( ⋆ → ⋆ ) → ( ⋆ → ⋆ ) := λ f : ⋆ → ⋆ . ( λ x : ⋆ . f ( f x ) )
+
+def four : ?2 := λ f : ?3 . ( λ x : ⋆ . twice ( twice f ) x )
+
+def flip : ?4 := λ f : ⋆ → ⋆ → ⋆ . ( λ x : ⋆ . ( λ y : ⋆ . f y x ) )
+
+def compose : ?5 := λ g : ⋆ → ⋆ . ( λ f : ⋆ → ⋆ . ( λ x : ⋆ . g ( f x ) ) )
